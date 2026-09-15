@@ -60,7 +60,21 @@
     gap:10px;
     align-items:center;
     justify-content:space-between;
-    margin-bottom:20px;
+    margin-bottom:12px;
+  }
+  .filter-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .filter-row .filter-label{
+    font-size:0.72rem;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--text-muted);
+    margin-right:2px;
   }
   .chips{ display:flex; flex-wrap:wrap; gap:8px; }
   .chip{
@@ -144,7 +158,6 @@
   /* ticket cards */
   #list{ display:grid; gap:14px; }
   .ticket{
-    position:relative;
     background:var(--card);
     border:1px solid var(--card-edge);
     border-radius:var(--radius);
@@ -154,25 +167,27 @@
     gap:8px;
     align-items:start;
   }
-  .ticket::before{
-    content:"";
-    position:absolute;
-    left:0; right:0; top:52px;
-    height:0;
-    border-top:2px dashed var(--card-edge);
-  }
   .ticket-main{ grid-column:1 / -1; display:flex; flex-direction:column; gap:8px; }
   .ticket-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
   .ticket-title{ font-size:1.15rem; font-weight:700; }
-  .ticket-meta{ display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
+  .ticket-meta{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-top:4px;
+    padding-bottom:10px;
+    border-bottom:2px dashed var(--card-edge);
+  }
   .badge{
     font-size:0.72rem;
     padding:3px 9px;
     border-radius:999px;
     border:1px solid var(--card-edge);
     color:var(--text-muted);
+    white-space:nowrap;
   }
   .badge.platform{ background:var(--bg-soft); }
+  .badge.person{ background:var(--bg-soft); }
   .badge.status-por_ver{ color:var(--text-muted); }
   .badge.status-a_ver{ color:var(--amber); border-color:var(--amber-dim); }
   .badge.status-visto{ color:var(--green); border-color:var(--green); }
@@ -219,8 +234,15 @@
 
 <main>
   <div class="toolbar">
-    <div class="chips" id="filterChips"></div>
+    <div class="filter-row" style="margin-bottom:0;">
+      <span class="filter-label">Estado</span>
+      <div class="chips" id="filterChips"></div>
+    </div>
     <button class="primary" id="btnNew">+ Adicionar</button>
+  </div>
+  <div class="filter-row">
+    <span class="filter-label">Quem</span>
+    <div class="chips" id="personChips"></div>
   </div>
 
   <div id="formPanel">
@@ -247,6 +269,8 @@
             <option value="hbo">HBO Max</option>
             <option value="prime">Prime Video</option>
             <option value="disco">Discovery+</option>
+            <option value="appletv">Apple TV+</option>
+            <option value="rtpplay">RTP Play</option>
             <option value="tv">TV</option>
             <option value="outro">Outro</option>
           </select>
@@ -266,6 +290,14 @@
         <div class="field" id="progressField">
           <label for="f_progress">Onde ficámos</label>
           <input id="f_progress" placeholder="Ex: Ep. 4, min 20">
+        </div>
+        <div class="field">
+          <label for="f_person">Quem</label>
+          <select id="f_person">
+            <option value="ambos">Os dois</option>
+            <option value="bruno">Bruno</option>
+            <option value="joana">Joana</option>
+          </select>
         </div>
       </div>
       <div class="field">
@@ -294,13 +326,16 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const PLATFORM_LABELS = {
   disney: 'Disney+', netflix: 'Netflix', hbo: 'HBO Max',
-  prime: 'Prime Video', disco: 'Discovery+', tv: 'TV', outro: 'Outro'
+  prime: 'Prime Video', disco: 'Discovery+', appletv: 'Apple TV+',
+  rtpplay: 'RTP Play', tv: 'TV', outro: 'Outro'
 };
 const TYPE_LABELS = { serie: 'Série', filme: 'Filme', documentario: 'Documentário' };
 const STATUS_LABELS = { por_ver: 'Por ver', a_ver: 'A ver', visto: 'Visto' };
+const PERSON_LABELS = { ambos: 'Os dois', bruno: 'Bruno', joana: 'Joana' };
 
 let items = [];
 let activeFilter = 'todos';
+let activePerson = 'todos';
 let editingId = null;
 
 const listEl = document.getElementById('list');
@@ -308,6 +343,7 @@ const statusMsg = document.getElementById('status-msg');
 const formPanel = document.getElementById('formPanel');
 const form = document.getElementById('itemForm');
 const chipsEl = document.getElementById('filterChips');
+const personChipsEl = document.getElementById('personChips');
 const progressField = document.getElementById('progressField');
 
 document.getElementById('btnNew').addEventListener('click', () => openForm());
@@ -327,6 +363,7 @@ function openForm(item = null){
   document.getElementById('f_season').value = item?.season || '';
   document.getElementById('f_status').value = item?.status || 'por_ver';
   document.getElementById('f_progress').value = item?.progress || '';
+  document.getElementById('f_person').value = item?.person || 'ambos';
   document.getElementById('f_notes').value = item?.notes || '';
   updateProgressVisibility();
   formPanel.classList.add('open');
@@ -347,6 +384,7 @@ form.addEventListener('submit', async (e) => {
     season: document.getElementById('f_season').value.trim(),
     status: document.getElementById('f_status').value,
     progress: document.getElementById('f_progress').value.trim(),
+    person: document.getElementById('f_person').value,
     notes: document.getElementById('f_notes').value.trim(),
   };
   if(!payload.name) return;
@@ -389,12 +427,25 @@ function renderChips(){
       renderList();
     });
   });
+
+  const people = [
+    ['todos','Todos'], ['bruno','Bruno'], ['joana','Joana'], ['ambos','Os dois']
+  ];
+  personChipsEl.innerHTML = people.map(([key,label]) =>
+    `<div class="chip ${activePerson===key?'active':''}" data-person="${key}">${label}</div>`
+  ).join('');
+  personChipsEl.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      activePerson = chip.dataset.person;
+      renderChips();
+      renderList();
+    });
+  });
 }
 
 function renderList(){
-  const filtered = activeFilter === 'todos'
-    ? items
-    : items.filter(i => i.status === activeFilter);
+  let filtered = activeFilter === 'todos' ? items : items.filter(i => i.status === activeFilter);
+  filtered = activePerson === 'todos' ? filtered : filtered.filter(i => (i.person || 'ambos') === activePerson);
 
   if(filtered.length === 0){
     listEl.innerHTML = `<div class="empty"><strong>Nada por aqui</strong>Adiciona o primeiro filme, série ou documentário para começarem a construir a lista.</div>`;
@@ -412,6 +463,7 @@ function renderList(){
               <span class="badge platform">${PLATFORM_LABELS[item.platform] || item.platform}</span>
               ${item.season ? `<span class="badge">${escapeHtml(item.season)}</span>` : ''}
               <span class="badge status-${item.status}">${STATUS_LABELS[item.status] || item.status}</span>
+              <span class="badge person">${PERSON_LABELS[item.person] || 'Os dois'}</span>
             </div>
           </div>
         </div>
@@ -461,3 +513,4 @@ loadItems();
 </script>
 </body>
 </html>
+
